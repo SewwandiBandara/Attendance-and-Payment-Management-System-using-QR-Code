@@ -70,11 +70,34 @@ A full-stack web application for managing student attendance and payments using 
    ```bash
    cd backendServer
    npm install
+   ```
+
+4. **Configure Email Notifications**
+
+   Email notifications are used for student registration, payment reminders, and attendance alerts.
+
+   ```bash
+   cd backendServer
+   # Edit .env file and add your email credentials
+   ```
+
+   Update the following in `.env`:
+   ```env
+   EMAIL_SERVICE=gmail
+   EMAIL_USER=your-email@gmail.com
+   EMAIL_PASSWORD=your-app-password
+   EMAIL_FROM="EduSpark System <your-email@gmail.com>"
+   ```
+
+   📖 **See detailed setup instructions**: [backendServer/EMAIL_SETUP.md](backendServer/EMAIL_SETUP.md)
+
+5. **Start Backend Server**
+   ```bash
    npm start
    ```
-   The backend server will run on http://localhost:3000 (or configured port)
+   The backend server will run on http://localhost:8081
 
-4. **Setup Frontend**
+6. **Setup Frontend**
    ```bash
    cd eduspark
    npm install
@@ -91,7 +114,7 @@ A full-stack web application for managing student attendance and payments using 
 - Admin dashboard
 - Course management
 - Payment management
-- Real-time notifications
+- **Email notifications** (Registration, Payment reminders, Attendance alerts)
 
 ## Development
 
