@@ -1,10 +1,20 @@
 const express = require('express');
-const mysql = require('mysql');
 const cors = require('cors');
 const bcrypt = require('bcryptjs'); // For password hashing
 const jwt = require('jsonwebtoken'); // For session tokens
+const connectDB = require('./config/db');
 
-
+// Import MongoDB Models
+const Grade = require('./models/Grade');
+const Subject = require('./models/Subject');
+const Class = require('./models/Class');
+const Course = require('./models/Course');
+const Student = require('./models/Student');
+const StudentSubject = require('./models/StudentSubject');
+const StudentCourse = require('./models/StudentCourse');
+const AttendanceRecord = require('./models/AttendanceRecord');
+const PaymentRecord = require('./models/PaymentRecord');
+const UserLogin = require('./models/UserLogin');
 
 const app = express();
 
@@ -17,28 +27,11 @@ app.use(express.json());
 //     allowedHeaders: ['Content-Type', 'Authorization']
 // }));
 
-
-
-
 // --- Secret Key for JWT (Keep this secure!) ---
 const JWT_SECRET = 'sew2002'; // CHANGE THIS!
 
 // --- Database Connection ---
-const db = mysql.createConnection({
-    host: "localhost",
-    user: "root",
-    password: "",
-    database: "wismin_db"
-});
-
-// Connect to Database
-db.connect((err) => {
-    if (err) {
-        console.error('Error connecting to database:', err);
-        process.exit(1);
-    }
-    console.log('MySQL Database Connected...');
-});
+connectDB();
 
 // --- API Routes ---
 
@@ -100,8 +93,8 @@ app.get('/', (req, res) => {
 //     });
 // });
 
-// Login Route (POST /login) - 
-app.post('/login', (req, res) => {
+// Login Route (POST /login) -
+app.post('/login', async (req, res) => {
     const { email, password, userType } = req.body;
 
     if (!email || !password || !userType) {
@@ -112,19 +105,31 @@ app.post('/login', (req, res) => {
     if (userType === 'admin') {
         if (email !== 'Admin123@gmail.com' || password !== 'admin123') {
             // Still record failed login attempt
-            const insertFailedLoginSql = "INSERT INTO user_login (email, login_time, status, user_type) VALUES (?, NOW(), 'failed', ?)";
-            db.query(insertFailedLoginSql, [email, userType], (err) => {
-                if (err) console.error("Error recording failed login:", err);
-            });
+            try {
+                await UserLogin.create({
+                    email: email,
+                    login_time: new Date(),
+                    status: 'failed',
+                    user_type: userType
+                });
+            } catch (err) {
+                console.error("Error recording failed login:", err);
+            }
             return res.status(401).json({ message: "Invalid admin credentials" });
         }
     } else if (userType === 'staff') {
         if (email !== 'Staffuser@gmail.com' || password !== 'staff123') {
             // Record failed login attempt
-            const insertFailedLoginSql = "INSERT INTO user_login (email, login_time, status, user_type) VALUES (?, NOW(), 'failed', ?)";
-            db.query(insertFailedLoginSql, [email, userType], (err) => {
-                if (err) console.error("Error recording failed login:", err);
-            });
+            try {
+                await UserLogin.create({
+                    email: email,
+                    login_time: new Date(),
+                    status: 'failed',
+                    user_type: userType
+                });
+            } catch (err) {
+                console.error("Error recording failed login:", err);
+            }
             return res.status(401).json({ message: "Invalid staff credentials" });
         }
     }
@@ -138,41 +143,46 @@ app.post('/login', (req, res) => {
     };
 
     // Record successful login
-    const insertLoginSql = "INSERT INTO user_login (user_id, email, login_time, status, user_type) VALUES (?, ?, NOW(), 'success', ?)";
-    db.query(insertLoginSql, [mockUser.id, email, userType], (loginErr, loginResult) => {
-        if (loginErr) {
-            console.error("Error recording login:", loginErr);
-            // Continue with login even if recording fails
+    try {
+        await UserLogin.create({
+            user_id: mockUser.id,
+            email: email,
+            login_time: new Date(),
+            status: 'success',
+            user_type: userType
+        });
+    } catch (loginErr) {
+        console.error("Error recording login:", loginErr);
+        // Continue with login even if recording fails
+    }
+
+    // Generate JWT Token
+    const payload = {
+        user: {
+            id: mockUser.id,
+            email: mockUser.email,
+            name: mockUser.name,
+            userType: mockUser.user_type
         }
+    };
 
-        // Generate JWT Token
-        const payload = {
-            user: {
-                id: mockUser.id,
-                email: mockUser.email,
-                name: mockUser.name,
-                userType: mockUser.user_type
+    jwt.sign(
+        payload,
+        JWT_SECRET,
+        { expiresIn: '1h' },
+        (err, token) => {
+            if (err) {
+                console.error("Error signing JWT:", err);
+                return res.status(500).json({ message: "Error generating session token." });
             }
-        };
-
-        jwt.sign(
-            payload,
-            JWT_SECRET,
-            { expiresIn: '1h' },
-            (err, token) => {
-                if (err) {
-                    console.error("Error signing JWT:", err);
-                    return res.status(500).json({ message: "Error generating session token." });
-                }
-                console.log("User logged in:", email);
-                res.json({
-                    message: "Login successful!",
-                    token: token,
-                    user: payload.user
-                });
-            }
-        );
-    });
+            console.log("User logged in:", email);
+            res.json({
+                message: "Login successful!",
+                token: token,
+                user: payload.user
+            });
+        }
+    );
 });
 
 
@@ -180,71 +190,76 @@ app.post('/login', (req, res) => {
 //------ --- Grade Management Routes -------------
 
 // Get all grades
-app.get('/grades', (req, res) => {
-    const sql = "SELECT * FROM grades";
-    db.query(sql, (err, results) => {
-        if (err) {
-            console.error("Error fetching grades:", err);
-            return res.status(500).json({ message: "Error fetching grades" });
-        }
-        res.json(results);
-    });
+app.get('/grades', async (req, res) => {
+    try {
+        const grades = await Grade.find();
+        res.json(grades);
+    } catch (err) {
+        console.error("Error fetching grades:", err);
+        return res.status(500).json({ message: "Error fetching grades" });
+    }
 });
 
 // Add a new grade
-app.post('/grades', (req, res) => {
+app.post('/grades', async (req, res) => {
     const { grade_id, name } = req.body;
     if (!grade_id || !name) {
         return res.status(400).json({ message: "Grade ID and name are required" });
     }
-    
-    const sql = "INSERT INTO grades (grade_id, name) VALUES (?, ?)";
-    db.query(sql, [grade_id, name], (err, result) => {
-        if (err) {
-            console.error("Error adding grade:", err);
-            return res.status(500).json({ message: "Error adding grade" });
-        }
+
+    try {
+        const grade = await Grade.create({ grade_id, name });
         res.status(201).json({ message: "Grade added successfully", grade_id });
-    });
+    } catch (err) {
+        console.error("Error adding grade:", err);
+        if (err.code === 11000) {
+            return res.status(409).json({ message: "Grade ID already exists" });
+        }
+        return res.status(500).json({ message: "Error adding grade" });
+    }
 });
 
 // Update a grade
-app.put('/grades/:id', (req, res) => {
+app.put('/grades/:id', async (req, res) => {
     const grade_id = req.params.id;
     const { name } = req.body;
-    
+
     if (!name) {
         return res.status(400).json({ message: "Grade name is required" });
     }
-    
-    const sql = "UPDATE grades SET name = ? WHERE grade_id = ?";
-    db.query(sql, [name, grade_id], (err, result) => {
-        if (err) {
-            console.error("Error updating grade:", err);
-            return res.status(500).json({ message: "Error updating grade" });
-        }
-        if (result.affectedRows === 0) {
+
+    try {
+        const result = await Grade.findOneAndUpdate(
+            { grade_id: grade_id },
+            { name: name },
+            { new: true }
+        );
+
+        if (!result) {
             return res.status(404).json({ message: "Grade not found" });
         }
         res.json({ message: "Grade updated successfully" });
-    });
+    } catch (err) {
+        console.error("Error updating grade:", err);
+        return res.status(500).json({ message: "Error updating grade" });
+    }
 });
 
 // Delete a grade
-app.delete('/grades/:id', (req, res) => {
+app.delete('/grades/:id', async (req, res) => {
     const grade_id = req.params.id;
-    
-    const sql = "DELETE FROM grades WHERE grade_id = ?";
-    db.query(sql, [grade_id], (err, result) => {
-        if (err) {
-            console.error("Error deleting grade:", err);
-            return res.status(500).json({ message: "Error deleting grade" });
-        }
-        if (result.affectedRows === 0) {
+
+    try {
+        const result = await Grade.findOneAndDelete({ grade_id: grade_id });
+
+        if (!result) {
             return res.status(404).json({ message: "Grade not found" });
         }
         res.json({ message: "Grade deleted successfully" });
-    });
+    } catch (err) {
+        console.error("Error deleting grade:", err);
+        return res.status(500).json({ message: "Error deleting grade" });
+    }
 });
 
 
@@ -252,85 +267,89 @@ app.delete('/grades/:id', (req, res) => {
 // ---------- Subject Management Routes --------------------
 
 // Get all subjects
-app.get('/subjects', (req, res) => {
-    const sql = "SELECT * FROM subjects";
-    db.query(sql, (err, results) => {
-        if (err) {
-            console.error("Error fetching subjects:", err);
-            return res.status(500).json({ message: "Error fetching subjects" });
-        }
-        res.json(results);
-    });
+app.get('/subjects', async (req, res) => {
+    try {
+        const subjects = await Subject.find();
+        res.json(subjects);
+    } catch (err) {
+        console.error("Error fetching subjects:", err);
+        return res.status(500).json({ message: "Error fetching subjects" });
+    }
 });
 
 // Add a new subject
-app.post('/subjects', (req, res) => {
+app.post('/subjects', async (req, res) => {
     const { subject_id, name, fee, lecturer } = req.body;
     if (!subject_id || !name || fee === undefined || !lecturer) {
         return res.status(400).json({ message: "Subject ID, name, fee, and lecturer are required" });
     }
-    
-    const sql = "INSERT INTO subjects (subject_id, name, fee, lecturer) VALUES (?, ?, ?, ?)";
-    db.query(sql, [subject_id, name, fee, lecturer], (err, result) => {
-        if (err) {
-            console.error("Error adding subject:", err);
-            return res.status(500).json({ message: "Error adding subject" });
-        }
+
+    try {
+        const subject = await Subject.create({ subject_id, name, fee, lecturer });
         res.status(201).json({ message: "Subject added successfully", subject_id });
-    });
+    } catch (err) {
+        console.error("Error adding subject:", err);
+        if (err.code === 11000) {
+            return res.status(409).json({ message: "Subject ID already exists" });
+        }
+        return res.status(500).json({ message: "Error adding subject" });
+    }
 });
 
 // Update a subject
-app.put('/subjects/:id', (req, res) => {
+app.put('/subjects/:id', async (req, res) => {
     const subject_id = req.params.id;
     const { name, fee, lecturer } = req.body;
-    
+
     if (!name || fee === undefined || !lecturer) {
         return res.status(400).json({ message: "Subject name, fee, and lecturer are required" });
     }
-    
-    const sql = "UPDATE subjects SET name = ?, fee = ?, lecturer = ? WHERE subject_id = ?";
-    db.query(sql, [name, fee, lecturer, subject_id], (err, result) => {
-        if (err) {
-            console.error("Error updating subject:", err);
-            return res.status(500).json({ message: "Error updating subject" });
-        }
-        if (result.affectedRows === 0) {
+
+    try {
+        const result = await Subject.findOneAndUpdate(
+            { subject_id: subject_id },
+            { name, fee, lecturer },
+            { new: true }
+        );
+
+        if (!result) {
             return res.status(404).json({ message: "Subject not found" });
         }
         res.json({ message: "Subject updated successfully" });
-    });
+    } catch (err) {
+        console.error("Error updating subject:", err);
+        return res.status(500).json({ message: "Error updating subject" });
+    }
 });
 
 
 // Add a new route to get lecturers
-app.get('/lecturers', (req, res) => {
-    const sql = "SELECT DISTINCT lecturer FROM subjects WHERE lecturer IS NOT NULL";
-    db.query(sql, (err, results) => {
-        if (err) {
-            console.error("Error fetching lecturers:", err);
-            return res.status(500).json({ message: "Error fetching lecturers" });
-        }
-        res.json(results.map(item => item.lecturer));
-    });
+app.get('/lecturers', async (req, res) => {
+    try {
+        const lecturers = await Subject.distinct('lecturer', { lecturer: { $ne: null } });
+        res.json(lecturers);
+    } catch (err) {
+        console.error("Error fetching lecturers:", err);
+        return res.status(500).json({ message: "Error fetching lecturers" });
+    }
 });
 
 
 // Delete a subject
-app.delete('/subjects/:id', (req, res) => {
+app.delete('/subjects/:id', async (req, res) => {
     const subject_id = req.params.id;
-    
-    const sql = "DELETE FROM subjects WHERE subject_id = ?";
-    db.query(sql, [subject_id], (err, result) => {
-        if (err) {
-            console.error("Error deleting subject:", err);
-            return res.status(500).json({ message: "Error deleting subject" });
-        }
-        if (result.affectedRows === 0) {
+
+    try {
+        const result = await Subject.findOneAndDelete({ subject_id: subject_id });
+
+        if (!result) {
             return res.status(404).json({ message: "Subject not found" });
         }
         res.json({ message: "Subject deleted successfully" });
-    });
+    } catch (err) {
+        console.error("Error deleting subject:", err);
+        return res.status(500).json({ message: "Error deleting subject" });
+    }
 });
 
 
@@ -338,93 +357,126 @@ app.delete('/subjects/:id', (req, res) => {
 // --- Class (Grade Subject) Management Routes ---
 
 // Get all classes
-app.get('/classes', (req, res) => {
-    const sql = `
-        SELECT c.*, g.name as grade_name, s.name as subject_name 
-        FROM classes c
-        JOIN grades g ON c.grade_id = g.grade_id
-        JOIN subjects s ON c.subject_id = s.subject_id
-    `;
-    db.query(sql, (err, results) => {
-        if (err) {
-            console.error("Error fetching classes:", err);
-            return res.status(500).json({ message: "Error fetching classes" });
-        }
-        res.json(results);
-    });
+app.get('/classes', async (req, res) => {
+    try {
+        const classes = await Class.aggregate([
+            {
+                $lookup: {
+                    from: 'grades',
+                    localField: 'grade_id',
+                    foreignField: 'grade_id',
+                    as: 'grade'
+                }
+            },
+            {
+                $lookup: {
+                    from: 'subjects',
+                    localField: 'subject_id',
+                    foreignField: 'subject_id',
+                    as: 'subject'
+                }
+            },
+            {
+                $unwind: { path: '$grade', preserveNullAndEmptyArrays: true }
+            },
+            {
+                $unwind: { path: '$subject', preserveNullAndEmptyArrays: true }
+            },
+            {
+                $addFields: {
+                    grade_name: '$grade.name',
+                    subject_name: '$subject.name'
+                }
+            },
+            {
+                $project: {
+                    grade: 0,
+                    subject: 0
+                }
+            }
+        ]);
+        res.json(classes);
+    } catch (err) {
+        console.error("Error fetching classes:", err);
+        return res.status(500).json({ message: "Error fetching classes" });
+    }
 });
 
 // Add a new class
-app.post('/classes', (req, res) => {
+app.post('/classes', async (req, res) => {
     const { grade_id, subject_id, time, day, lecturer, mode, fee } = req.body;
-    
+
     if (!grade_id || !subject_id || !time || !day || !lecturer || !mode || fee === undefined) {
         return res.status(400).json({ message: "All class details are required" });
     }
-    
-    const sql = `
-        INSERT INTO classes 
-        (grade_id, subject_id, time, day, lecturer, mode, fee) 
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    `;
-    const values = [grade_id, subject_id, time, day, lecturer, mode, fee];
-    
-    db.query(sql, values, (err, result) => {
-        if (err) {
-            console.error("Error adding class:", err);
-            return res.status(500).json({ message: "Error adding class" });
-        }
-        res.status(201).json({ 
-            message: "Class added successfully", 
-            class_id: result.insertId 
+
+    try {
+        // Get the next class_id
+        const lastClass = await Class.findOne().sort({ class_id: -1 });
+        const class_id = lastClass ? lastClass.class_id + 1 : 1;
+
+        const newClass = await Class.create({
+            class_id,
+            grade_id,
+            subject_id,
+            time,
+            day,
+            lecturer,
+            mode,
+            fee
         });
-    });
+
+        res.status(201).json({
+            message: "Class added successfully",
+            class_id: class_id
+        });
+    } catch (err) {
+        console.error("Error adding class:", err);
+        return res.status(500).json({ message: "Error adding class" });
+    }
 });
 
 // Update a class
-app.put('/classes/:id', (req, res) => {
+app.put('/classes/:id', async (req, res) => {
     const class_id = req.params.id;
     const { grade_id, subject_id, time, day, lecturer, mode, fee } = req.body;
-    
+
     if (!grade_id || !subject_id || !time || !day || !lecturer || !mode || fee === undefined) {
         return res.status(400).json({ message: "All class details are required" });
     }
-    
-    const sql = `
-        UPDATE classes 
-        SET grade_id = ?, subject_id = ?, time = ?, day = ?, 
-            lecturer = ?, mode = ?, fee = ?
-        WHERE class_id = ?
-    `;
-    const values = [grade_id, subject_id, time, day, lecturer, mode, fee, class_id];
-    
-    db.query(sql, values, (err, result) => {
-        if (err) {
-            console.error("Error updating class:", err);
-            return res.status(500).json({ message: "Error updating class" });
-        }
-        if (result.affectedRows === 0) {
+
+    try {
+        const result = await Class.findOneAndUpdate(
+            { class_id: parseInt(class_id) },
+            { grade_id, subject_id, time, day, lecturer, mode, fee },
+            { new: true }
+        );
+
+        if (!result) {
             return res.status(404).json({ message: "Class not found" });
         }
         res.json({ message: "Class updated successfully" });
-    });
+    } catch (err) {
+        console.error("Error updating class:", err);
+        return res.status(500).json({ message: "Error updating class" });
+    }
 });
 
 // Delete a class
-app.delete('/classes/:id', (req, res) => {
+app.delete('/classes/:id', async (req, res) => {
     const class_id = req.params.id;
-    
-    const sql = "DELETE FROM classes WHERE class_id = ?";
-    db.query(sql, [class_id], (err, result) => {
-        if (err) {
-            console.error("Error deleting class:", err);
-            return res.status(500).json({ message: "Error deleting class" });
-        }
-        if (result.affectedRows === 0) {
+
+    try {
+        const result = await Class.findOneAndDelete({ class_id: parseInt(class_id) });
+
+        if (!result) {
             return res.status(404).json({ message: "Class not found" });
         }
         res.json({ message: "Class deleted successfully" });
-    });
+    } catch (err) {
+        console.error("Error deleting class:", err);
+        return res.status(500).json({ message: "Error deleting class" });
+    }
 });
 
 
@@ -432,121 +484,123 @@ app.delete('/classes/:id', (req, res) => {
 // ---------------- Course Management Routes --------------////////////
 
 // Get all courses
-app.get('/courses', (req, res) => {
-    const sql = "SELECT * FROM courses";
-    db.query(sql, (err, results) => {
-        if (err) {
-            console.error("Error fetching courses:", err);
-            return res.status(500).json({ message: "Error fetching courses" });
-        }
-        res.json(results);
-    });
+app.get('/courses', async (req, res) => {
+    try {
+        const courses = await Course.find();
+        res.json(courses);
+    } catch (err) {
+        console.error("Error fetching courses:", err);
+        return res.status(500).json({ message: "Error fetching courses" });
+    }
 });
 
 // Add a new course
-app.post('/courses', (req, res) => {
+app.post('/courses', async (req, res) => {
     const { course_id, name, description, time, day, lecturer, fee } = req.body;
-    
+
     if (!course_id || !name || !time || !day || !lecturer || fee === undefined) {
         return res.status(400).json({ message: "All required course details must be provided" });
     }
-    
-    const sql = `
-        INSERT INTO courses 
-        (course_id, name, description, time, day, lecturer, fee) 
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    `;
-    const values = [course_id, name, description, time, day, lecturer, fee];
-    
-    db.query(sql, values, (err, result) => {
-        if (err) {
-            console.error("Error adding course:", err);
-            return res.status(500).json({ message: "Error adding course" });
-        }
-        res.status(201).json({ 
-            message: "Course added successfully", 
-            course_id 
+
+    try {
+        const course = await Course.create({
+            course_id,
+            name,
+            description,
+            time,
+            day,
+            lecturer,
+            fee
         });
-    });
+
+        res.status(201).json({
+            message: "Course added successfully",
+            course_id
+        });
+    } catch (err) {
+        console.error("Error adding course:", err);
+        if (err.code === 11000) {
+            return res.status(409).json({ message: "Course ID already exists" });
+        }
+        return res.status(500).json({ message: "Error adding course" });
+    }
 });
 
 // Update a course
-app.put('/courses/:id', (req, res) => {
+app.put('/courses/:id', async (req, res) => {
     const course_id = req.params.id;
     const { name, description, time, day, lecturer, fee } = req.body;
-    
+
     if (!name || !time || !day || !lecturer || fee === undefined) {
         return res.status(400).json({ message: "All required course details must be provided" });
     }
-    
-    const sql = `
-        UPDATE courses 
-        SET name = ?, description = ?, time = ?, day = ?, 
-            lecturer = ?, fee = ?
-        WHERE course_id = ?
-    `;
-    const values = [name, description, time, day, lecturer, fee, course_id];
-    
-    db.query(sql, values, (err, result) => {
-        if (err) {
-            console.error("Error updating course:", err);
-            return res.status(500).json({ message: "Error updating course" });
-        }
-        if (result.affectedRows === 0) {
+
+    try {
+        const result = await Course.findOneAndUpdate(
+            { course_id: parseInt(course_id) },
+            { name, description, time, day, lecturer, fee },
+            { new: true }
+        );
+
+        if (!result) {
             return res.status(404).json({ message: "Course not found" });
         }
         res.json({ message: "Course updated successfully" });
-    });
+    } catch (err) {
+        console.error("Error updating course:", err);
+        return res.status(500).json({ message: "Error updating course" });
+    }
 });
 
 // Delete a course
-app.delete('/courses/:id', (req, res) => {
+app.delete('/courses/:id', async (req, res) => {
     const course_id = req.params.id;
-    
-    const sql = "DELETE FROM courses WHERE course_id = ?";
-    db.query(sql, [course_id], (err, result) => {
-        if (err) {
-            console.error("Error deleting course:", err);
-            return res.status(500).json({ message: "Error deleting course" });
-        }
-        if (result.affectedRows === 0) {
+
+    try {
+        const result = await Course.findOneAndDelete({ course_id: parseInt(course_id) });
+
+        if (!result) {
             return res.status(404).json({ message: "Course not found" });
         }
         res.json({ message: "Course deleted successfully" });
-    });
+    } catch (err) {
+        console.error("Error deleting course:", err);
+        return res.status(500).json({ message: "Error deleting course" });
+    }
 });
 
 
 // -----------Student Registration Routes----------//////////
 
 // Get next available student ID for a grade
-app.get('/students/next-id/:gradeId', (req, res) => {
+app.get('/students/next-id/:gradeId', async (req, res) => {
     const gradeId = req.params.gradeId;
-    
-    // Example logic - adjust based on your ID generation scheme
-    const sql = "SELECT MAX(student_id) as maxId FROM students WHERE student_id LIKE ?";
-    const prefix = `St${gradeId}`;
-    
-    db.query(sql, [`${prefix}%`], (err, results) => {
-        if (err) {
-            console.error("Error fetching next student ID:", err);
-            return res.status(500).json({ message: "Error generating student ID" });
-        }
-        
+
+    try {
+        const prefix = `St${gradeId}`;
+
+        // Find all students with this prefix and get the maximum ID
+        const students = await Student.find({
+            student_id: new RegExp(`^${prefix}`)
+        }).sort({ student_id: -1 }).limit(1);
+
         let nextId;
-        if (results[0].maxId) {
-            const lastNum = parseInt(results[0].maxId.replace(prefix, '')) || 0;
+        if (students.length > 0 && students[0].student_id) {
+            const lastNum = parseInt(students[0].student_id.replace(prefix, '')) || 0;
             nextId = `${prefix}${String(lastNum + 1).padStart(3, '0')}`;
         } else {
             nextId = `${prefix}001`; // First student for this grade
         }
-        
+
         res.json({ nextStudentId: nextId });
-    });
+    } catch (err) {
+        console.error("Error fetching next student ID:", err);
+        return res.status(500).json({ message: "Error generating student ID" });
+    }
 });
 
 // Register a new student
-app.post('/students', (req, res) => {
+app.post('/students', async (req, res) => {
     const {
         student_id,
         first_name,
@@ -560,249 +614,232 @@ app.post('/students', (req, res) => {
     } = req.body;
 
     // Basic validation
-    if (!student_id || !first_name || !last_name || !grade_id || 
+    if (!student_id || !first_name || !last_name || !grade_id ||
         !Array.isArray(subjects) || !password || !mobile || !email) {
         return res.status(400).json({ message: "Missing required fields" });
     }
 
-    // Start transaction
-    db.beginTransaction(async (err) => {
-        if (err) {
-            console.error("Transaction error:", err);
-            return res.status(500).json({ message: "Database error" });
+    const mongoose = require('mongoose');
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        // 1. Insert student basic info
+        const student = await Student.create([{
+            student_id,
+            first_name,
+            last_name,
+            grade_id,
+            password,
+            mobile,
+            email
+        }], { session });
+
+        // 2. Insert student subjects
+        if (subjects.length > 0) {
+            const subjectDocs = subjects.map(subject_id => ({
+                student_id,
+                subject_id
+            }));
+            await StudentSubject.insertMany(subjectDocs, { session });
         }
 
-        try {
-            // 1. Insert student basic info
-            const insertStudentSql = `
-                INSERT INTO students 
-                (student_id, first_name, last_name, grade_id, password, mobile, email) 
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            `;
-            const studentValues = [student_id, first_name, last_name, grade_id, password, mobile, email];
-            
-            await new Promise((resolve, reject) => {
-                db.query(insertStudentSql, studentValues, (err, result) => {
-                    if (err) return reject(err);
-                    resolve(result);
-                });
-            });
-
-            // 2. Insert student subjects
-            if (subjects.length > 0) {
-                const subjectSql = `
-                    INSERT INTO student_subjects 
-                    (student_id, subject_id) 
-                    VALUES ?
-                `;
-                const subjectValues = subjects.map(subject_id => [student_id, subject_id]);
-                
-                await new Promise((resolve, reject) => {
-                    db.query(subjectSql, [subjectValues], (err, result) => {
-                        if (err) return reject(err);
-                        resolve(result);
-                    });
-                });
-            }
-
-            // 3. Insert student courses (if any)
-            if (courses && courses.length > 0) {
-                const courseSql = `
-                    INSERT INTO student_courses 
-                    (student_id, course_id) 
-                    VALUES ?
-                `;
-                const courseValues = courses.map(course_id => [student_id, course_id]);
-                
-                await new Promise((resolve, reject) => {
-                    db.query(courseSql, [courseValues], (err, result) => {
-                        if (err) return reject(err);
-                        resolve(result);
-                    });
-                });
-            }
-
-            // Commit transaction
-            db.commit((err) => {
-                if (err) {
-                    console.error("Commit error:", err);
-                    return db.rollback(() => {
-                        res.status(500).json({ message: "Error saving student data" });
-                    });
-                }
-                res.status(201).json({ 
-                    message: "Student registered successfully",
-                    studentId: student_id
-                });
-            });
-        } catch (error) {
-            // Rollback on error
-            db.rollback(() => {
-                console.error("Registration error:", error);
-                if (error.code === 'ER_DUP_ENTRY') {
-                    res.status(409).json({ message: "Student ID already exists" });
-                } else {
-                    res.status(500).json({ message: "Error registering student" });
-                }
-            });
+        // 3. Insert student courses (if any)
+        if (courses && courses.length > 0) {
+            const courseDocs = courses.map(course_id => ({
+                student_id,
+                course_id
+            }));
+            await StudentCourse.insertMany(courseDocs, { session });
         }
-    });
+
+        // Commit transaction
+        await session.commitTransaction();
+        session.endSession();
+
+        res.status(201).json({
+            message: "Student registered successfully",
+            studentId: student_id
+        });
+    } catch (error) {
+        // Rollback on error
+        await session.abortTransaction();
+        session.endSession();
+
+        console.error("Registration error:", error);
+        if (error.code === 11000) {
+            res.status(409).json({ message: "Student ID already exists" });
+        } else {
+            res.status(500).json({ message: "Error registering student" });
+        }
+    }
 });
 
 //////////////-----------generate student qr code ------//////////
 // Get student data by ID (for QR code generation)
-app.get('/students/:id', (req, res) => {
+app.get('/students/:id', async (req, res) => {
     const studentId = req.params.id;
-    
-    const sql = `
-        SELECT s.student_id, s.first_name, s.last_name, s.mobile, s.password, 
-               g.name as grade_name
-        FROM students s
-        JOIN grades g ON s.grade_id = g.grade_id
-        WHERE s.student_id = ?
-    `;
-    
-    db.query(sql, [studentId], (err, results) => {
-        if (err) {
-            console.error("Error fetching student:", err);
-            return res.status(500).json({ message: "Error fetching student data" });
-        }
-        if (results.length === 0) {
+
+    try {
+        const student = await Student.findOne({ student_id: studentId });
+
+        if (!student) {
             return res.status(404).json({ message: "Student not found" });
         }
-        
-        const student = results[0];
+
+        const grade = await Grade.findOne({ grade_id: student.grade_id });
+
         res.json({
             studentId: student.student_id,
             firstName: student.first_name,
             lastName: student.last_name,
             mobile: student.mobile,
             password: student.password,
-            grade: student.grade_name
+            grade: grade ? grade.name : ''
         });
-    });
+    } catch (err) {
+        console.error("Error fetching student:", err);
+        return res.status(500).json({ message: "Error fetching student data" });
+    }
 });
 
 // Store QR code image data in database
-app.post('/students/:id/upload-qr', (req, res) => {
+app.post('/students/:id/upload-qr', async (req, res) => {
     const studentId = req.params.id;
     const { qrImage } = req.body; // This will be base64 encoded image data
-    
+
     if (!qrImage) {
         return res.status(400).json({ message: "QR image data is required" });
     }
-    
-    // Store the base64 image data in the database
-    const sql = "UPDATE students SET qr_code_image = ? WHERE student_id = ?";
-    db.query(sql, [qrImage, studentId], (err, result) => {
-        if (err) {
-            console.error("Error storing QR code image:", err);
-            return res.status(500).json({ message: "Error storing QR code image" });
-        }
-        if (result.affectedRows === 0) {
+
+    try {
+        const result = await Student.findOneAndUpdate(
+            { student_id: studentId },
+            { qr_code_image: qrImage },
+            { new: true }
+        );
+
+        if (!result) {
             return res.status(404).json({ message: "Student not found" });
         }
         res.json({ message: "QR code image uploaded successfully" });
-    });
+    } catch (err) {
+        console.error("Error storing QR code image:", err);
+        return res.status(500).json({ message: "Error storing QR code image" });
+    }
 });
+
 // Get QR code image for a student
-app.get('/students/:id/qrcode-image', (req, res) => {
+app.get('/students/:id/qrcode-image', async (req, res) => {
     const studentId = req.params.id;
-    
-    const sql = "SELECT qr_code_image FROM students WHERE student_id = ?";
-    db.query(sql, [studentId], (err, results) => {
-        if (err) {
-            console.error("Error fetching QR code image:", err);
-            return res.status(500).json({ message: "Error fetching QR code image" });
-        }
-        if (results.length === 0) {
+
+    try {
+        const student = await Student.findOne(
+            { student_id: studentId },
+            { qr_code_image: 1 }
+        );
+
+        if (!student) {
             return res.status(404).json({ message: "Student not found" });
         }
-        if (!results[0].qr_code_image) {
+        if (!student.qr_code_image) {
             return res.status(404).json({ message: "QR code image not generated for this student" });
         }
-        
-        res.json({ qrImage: results[0].qr_code_image });
-    });
+
+        res.json({ qrImage: student.qr_code_image });
+    } catch (err) {
+        console.error("Error fetching QR code image:", err);
+        return res.status(500).json({ message: "Error fetching QR code image" });
+    }
 });
 
 
 //------------manage student's data-//
 
 // Get all students
-app.get('/students', (req, res) => {
-    const sql = `
-      SELECT s.*, g.name as grade_name 
-      FROM students s
-      LEFT JOIN grades g ON s.grade_id = g.grade_id
-    `;
-    
-    db.query(sql, (err, results) => {
-      if (err) {
+app.get('/students', async (req, res) => {
+    try {
+        const students = await Student.aggregate([
+            {
+                $lookup: {
+                    from: 'grades',
+                    localField: 'grade_id',
+                    foreignField: 'grade_id',
+                    as: 'grade'
+                }
+            },
+            {
+                $unwind: { path: '$grade', preserveNullAndEmptyArrays: true }
+            },
+            {
+                $addFields: {
+                    grade_name: '$grade.name'
+                }
+            },
+            {
+                $project: {
+                    grade: 0
+                }
+            }
+        ]);
+        res.json(students);
+    } catch (err) {
         console.error("Error fetching students:", err);
         return res.status(500).json({ message: "Error fetching students" });
-      }
-      res.json(results);
-    });
-  });
-  
-  // Delete a student
-  app.delete('/students/:id', (req, res) => {
+    }
+});
+
+// Delete a student
+app.delete('/students/:id', async (req, res) => {
     const studentId = req.params.id;
-    
-    const sql = "DELETE FROM students WHERE student_id = ?";
-    db.query(sql, [studentId], (err, result) => {
-      if (err) {
+
+    try {
+        const result = await Student.findOneAndDelete({ student_id: studentId });
+
+        if (!result) {
+            return res.status(404).json({ message: "Student not found" });
+        }
+
+        // Also delete related student_subjects and student_courses
+        await StudentSubject.deleteMany({ student_id: studentId });
+        await StudentCourse.deleteMany({ student_id: studentId });
+
+        res.json({ message: "Student deleted successfully" });
+    } catch (err) {
         console.error("Error deleting student:", err);
         return res.status(500).json({ message: "Error deleting student" });
-      }
-      if (result.affectedRows === 0) {
-        return res.status(404).json({ message: "Student not found" });
-      }
-      res.json({ message: "Student deleted successfully" });
-    });
-  });
+    }
+});
 
 
 // Update a student
-app.put('/students/:id', (req, res) => {
+app.put('/students/:id', async (req, res) => {
     const studentId = req.params.id;
     const { first_name, last_name, grade_id, mobile, email } = req.body;
-    
+
     if (!first_name || !last_name || !grade_id || !mobile || !email) {
         return res.status(400).json({ message: "All student details are required" });
     }
-    
-    const sql = `
-        UPDATE students 
-        SET first_name = ?, last_name = ?, grade_id = ?, 
-            mobile = ?, email = ?
-        WHERE student_id = ?
-    `;
-    const values = [first_name, last_name, grade_id, mobile, email, studentId];
-    
-    db.query(sql, values, (err, result) => {
-        if (err) {
-            console.error("Error updating student:", err);
-            return res.status(500).json({ message: "Error updating student" });
-        }
-        if (result.affectedRows === 0) {
+
+    try {
+        const updatedStudent = await Student.findOneAndUpdate(
+            { student_id: studentId },
+            { first_name, last_name, grade_id, mobile, email },
+            { new: true }
+        );
+
+        if (!updatedStudent) {
             return res.status(404).json({ message: "Student not found" });
         }
-        
-        // Get the updated student data to return
-        const getSql = "SELECT * FROM students WHERE student_id = ?";
-        db.query(getSql, [studentId], (err, results) => {
-            if (err) {
-                console.error("Error fetching updated student:", err);
-                return res.json({ message: "Student updated successfully" });
-            }
-            res.json({ 
-                message: "Student updated successfully",
-                student: results[0]
-            });
+
+        res.json({
+            message: "Student updated successfully",
+            student: updatedStudent
         });
-    });
+    } catch (err) {
+        console.error("Error updating student:", err);
+        return res.status(500).json({ message: "Error updating student" });
+    }
 });
 
 
