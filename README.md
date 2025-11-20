@@ -107,14 +107,26 @@ A full-stack web application for managing student attendance and payments using 
 
 ## Features
 
-- QR Code-based attendance tracking
+- **QR Code-based attendance tracking** (Webcam scanning)
+- **QR Code generation** for each student
 - Student management
 - Parent portal
 - Staff dashboard
 - Admin dashboard
 - Course management
-- Payment management
+- Payment management via QR code scanning
 - **Email notifications** (Registration, Payment reminders, Attendance alerts)
+
+## QR Code Scanner
+
+The system uses webcam-based QR code scanning for attendance and payment management.
+
+📖 **Complete QR Scanner Guide**: [eduspark/QR_SCANNER_SETUP.md](eduspark/QR_SCANNER_SETUP.md)
+
+**Quick Setup:**
+- Browser must have camera permissions
+- HTTPS required for production (works on localhost for development)
+- Supported browsers: Chrome, Firefox, Safari, Edge (latest versions)
 
 ## Development
 
