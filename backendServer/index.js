@@ -1,10 +1,10 @@
+require('dotenv').config(); // Load environment variables
 const express = require('express');
 const mysql = require('mysql');
 const cors = require('cors');
 const bcrypt = require('bcryptjs'); // For password hashing
 const jwt = require('jsonwebtoken'); // For session tokens
-
-
+const nodemailer = require('nodemailer'); // For sending emails
 
 const app = express();
 
@@ -21,14 +21,14 @@ app.use(express.json());
 
 
 // --- Secret Key for JWT (Keep this secure!) ---
-const JWT_SECRET = 'sew2002'; // CHANGE THIS!
+const JWT_SECRET = process.env.JWT_SECRET || 'sew2002';
 
 // --- Database Connection ---
 const db = mysql.createConnection({
-    host: "localhost",
-    user: "root",
-    password: "",
-    database: "wismin_db"
+    host: process.env.DB_HOST || "localhost",
+    user: process.env.DB_USER || "root",
+    password: process.env.DB_PASSWORD || "",
+    database: process.env.DB_NAME || "wismin_db"
 });
 
 // Connect to Database
@@ -39,6 +39,166 @@ db.connect((err) => {
     }
     console.log('MySQL Database Connected...');
 });
+
+// --- Email Configuration (Nodemailer) ---
+const transporter = nodemailer.createTransport({
+    service: process.env.EMAIL_SERVICE || 'gmail',
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASSWORD
+    }
+});
+
+// Verify email configuration
+transporter.verify((error, success) => {
+    if (error) {
+        console.error('Email configuration error:', error);
+        console.log('⚠️  Email notifications will not work. Please configure EMAIL_USER and EMAIL_PASSWORD in .env file');
+    } else {
+        console.log('✓ Email server is ready to send notifications');
+    }
+});
+
+// --- Email Utility Functions ---
+
+/**
+ * Send email helper function
+ */
+async function sendEmail(to, subject, htmlContent) {
+    try {
+        const mailOptions = {
+            from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
+            to: to,
+            subject: subject,
+            html: htmlContent
+        };
+
+        const info = await transporter.sendMail(mailOptions);
+        console.log('Email sent successfully:', info.messageId);
+        return { success: true, messageId: info.messageId };
+    } catch (error) {
+        console.error('Error sending email:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Send student registration confirmation email
+ */
+async function sendStudentRegistrationEmail(studentData) {
+    const { email, first_name, last_name, student_id, password, grade_name } = studentData;
+
+    const subject = '🎓 Welcome to EduSpark - Registration Successful';
+    const htmlContent = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
+            <h2 style="color: #2563eb; text-align: center;">Welcome to EduSpark! 🎓</h2>
+            <p>Dear <strong>${first_name} ${last_name}</strong>,</p>
+
+            <p>Congratulations! Your registration has been completed successfully.</p>
+
+            <div style="background-color: #f3f4f6; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                <h3 style="color: #1f2937; margin-top: 0;">Your Account Details:</h3>
+                <p><strong>Student ID:</strong> ${student_id}</p>
+                <p><strong>Name:</strong> ${first_name} ${last_name}</p>
+                <p><strong>Grade:</strong> ${grade_name}</p>
+                <p><strong>Email:</strong> ${email}</p>
+                <p><strong>Temporary Password:</strong> ${password}</p>
+            </div>
+
+            <div style="background-color: #fef3c7; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #f59e0b;">
+                <p style="margin: 0;"><strong>⚠️ Important:</strong> Please change your password after your first login for security purposes.</p>
+            </div>
+
+            <p>You can now use your Student ID and password to access the student portal and view your QR code for attendance tracking.</p>
+
+            <p style="margin-top: 30px;">If you have any questions, please contact our support team.</p>
+
+            <p style="color: #6b7280; font-size: 12px; margin-top: 30px; border-top: 1px solid #e0e0e0; padding-top: 15px;">
+                Best regards,<br>
+                <strong>EduSpark Team</strong><br>
+                <em>This is an automated email. Please do not reply to this message.</em>
+            </p>
+        </div>
+    `;
+
+    return await sendEmail(email, subject, htmlContent);
+}
+
+/**
+ * Send payment reminder email
+ */
+async function sendPaymentReminderEmail(studentData, paymentDetails) {
+    const { email, first_name, last_name, student_id } = studentData;
+    const { amount, dueDate, description } = paymentDetails;
+
+    const subject = '💳 Payment Reminder - EduSpark';
+    const htmlContent = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
+            <h2 style="color: #dc2626; text-align: center;">Payment Reminder 💳</h2>
+            <p>Dear <strong>${first_name} ${last_name}</strong>,</p>
+
+            <p>This is a friendly reminder about your pending payment.</p>
+
+            <div style="background-color: #fef2f2; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #dc2626;">
+                <h3 style="color: #7f1d1d; margin-top: 0;">Payment Details:</h3>
+                <p><strong>Student ID:</strong> ${student_id}</p>
+                <p><strong>Amount Due:</strong> Rs. ${amount}</p>
+                <p><strong>Due Date:</strong> ${dueDate}</p>
+                <p><strong>Description:</strong> ${description}</p>
+            </div>
+
+            <p>Please ensure payment is made by the due date to avoid any interruption in your classes.</p>
+
+            <p style="margin-top: 30px;">For payment inquiries, please contact our administrative office.</p>
+
+            <p style="color: #6b7280; font-size: 12px; margin-top: 30px; border-top: 1px solid #e0e0e0; padding-top: 15px;">
+                Best regards,<br>
+                <strong>EduSpark Finance Team</strong><br>
+                <em>This is an automated email. Please do not reply to this message.</em>
+            </p>
+        </div>
+    `;
+
+    return await sendEmail(email, subject, htmlContent);
+}
+
+/**
+ * Send attendance alert email to parents
+ */
+async function sendAttendanceAlertEmail(parentEmail, studentData, attendanceDetails) {
+    const { first_name, last_name, student_id } = studentData;
+    const { absenceDays, totalClasses, attendancePercentage } = attendanceDetails;
+
+    const subject = '⚠️ Student Attendance Alert - EduSpark';
+    const htmlContent = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
+            <h2 style="color: #ea580c; text-align: center;">Attendance Alert ⚠️</h2>
+            <p>Dear Parent/Guardian,</p>
+
+            <p>We would like to inform you about the attendance status of your child:</p>
+
+            <div style="background-color: #fff7ed; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #ea580c;">
+                <h3 style="color: #7c2d12; margin-top: 0;">Student Information:</h3>
+                <p><strong>Student Name:</strong> ${first_name} ${last_name}</p>
+                <p><strong>Student ID:</strong> ${student_id}</p>
+                <p><strong>Days Absent:</strong> ${absenceDays} out of ${totalClasses} classes</p>
+                <p><strong>Attendance Rate:</strong> ${attendancePercentage}%</p>
+            </div>
+
+            <p>We recommend reviewing this with your child to ensure regular attendance for better academic performance.</p>
+
+            <p style="margin-top: 30px;">If there are any concerns or questions, please feel free to contact us.</p>
+
+            <p style="color: #6b7280; font-size: 12px; margin-top: 30px; border-top: 1px solid #e0e0e0; padding-top: 15px;">
+                Best regards,<br>
+                <strong>EduSpark Academic Team</strong><br>
+                <em>This is an automated email. Please do not reply to this message.</em>
+            </p>
+        </div>
+    `;
+
+    return await sendEmail(parentEmail, subject, htmlContent);
+}
 
 // --- API Routes ---
 
@@ -623,16 +783,38 @@ app.post('/students', (req, res) => {
             }
 
             // Commit transaction
-            db.commit((err) => {
+            db.commit(async (err) => {
                 if (err) {
                     console.error("Commit error:", err);
                     return db.rollback(() => {
                         res.status(500).json({ message: "Error saving student data" });
                     });
                 }
-                res.status(201).json({ 
-                    message: "Student registered successfully",
-                    studentId: student_id
+
+                // Get grade name for email
+                const gradeQuery = "SELECT name FROM grades WHERE grade_id = ?";
+                db.query(gradeQuery, [grade_id], async (gradeErr, gradeResults) => {
+                    const grade_name = gradeResults && gradeResults.length > 0
+                        ? gradeResults[0].name
+                        : 'N/A';
+
+                    // Send welcome email
+                    const emailData = {
+                        email,
+                        first_name,
+                        last_name,
+                        student_id,
+                        password,
+                        grade_name
+                    };
+
+                    const emailResult = await sendStudentRegistrationEmail(emailData);
+
+                    res.status(201).json({
+                        message: "Student registered successfully",
+                        studentId: student_id,
+                        emailSent: emailResult.success
+                    });
                 });
             });
         } catch (error) {
@@ -805,6 +987,183 @@ app.put('/students/:id', (req, res) => {
     });
 });
 
+
+// ------------ Email Notification Routes ------------
+
+// Test email endpoint
+app.post('/send-test-email', async (req, res) => {
+    const { email } = req.body;
+
+    if (!email) {
+        return res.status(400).json({ message: "Email address is required" });
+    }
+
+    const subject = '✅ Test Email from EduSpark';
+    const htmlContent = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #2563eb;">Email Configuration Test</h2>
+            <p>This is a test email from your EduSpark system.</p>
+            <p>If you received this email, your email configuration is working correctly! ✅</p>
+            <p style="color: #6b7280; font-size: 12px; margin-top: 30px;">
+                Sent at: ${new Date().toLocaleString()}
+            </p>
+        </div>
+    `;
+
+    const result = await sendEmail(email, subject, htmlContent);
+
+    if (result.success) {
+        res.json({ message: "Test email sent successfully!", success: true });
+    } else {
+        res.status(500).json({
+            message: "Failed to send test email",
+            error: result.error,
+            success: false
+        });
+    }
+});
+
+// Send payment reminder
+app.post('/send-payment-reminder', async (req, res) => {
+    const { studentId, amount, dueDate, description } = req.body;
+
+    if (!studentId || !amount || !dueDate) {
+        return res.status(400).json({ message: "Student ID, amount, and due date are required" });
+    }
+
+    // Get student details
+    const sql = "SELECT * FROM students WHERE student_id = ?";
+    db.query(sql, [studentId], async (err, results) => {
+        if (err) {
+            console.error("Error fetching student:", err);
+            return res.status(500).json({ message: "Error fetching student data" });
+        }
+        if (results.length === 0) {
+            return res.status(404).json({ message: "Student not found" });
+        }
+
+        const student = results[0];
+        const studentData = {
+            email: student.email,
+            first_name: student.first_name,
+            last_name: student.last_name,
+            student_id: student.student_id
+        };
+
+        const paymentDetails = {
+            amount,
+            dueDate,
+            description: description || 'Class fees'
+        };
+
+        const result = await sendPaymentReminderEmail(studentData, paymentDetails);
+
+        if (result.success) {
+            res.json({ message: "Payment reminder sent successfully!", success: true });
+        } else {
+            res.status(500).json({
+                message: "Failed to send payment reminder",
+                error: result.error,
+                success: false
+            });
+        }
+    });
+});
+
+// Send attendance alert
+app.post('/send-attendance-alert', async (req, res) => {
+    const { studentId, parentEmail, absenceDays, totalClasses } = req.body;
+
+    if (!studentId || !parentEmail || absenceDays === undefined || !totalClasses) {
+        return res.status(400).json({
+            message: "Student ID, parent email, absence days, and total classes are required"
+        });
+    }
+
+    // Get student details
+    const sql = "SELECT * FROM students WHERE student_id = ?";
+    db.query(sql, [studentId], async (err, results) => {
+        if (err) {
+            console.error("Error fetching student:", err);
+            return res.status(500).json({ message: "Error fetching student data" });
+        }
+        if (results.length === 0) {
+            return res.status(404).json({ message: "Student not found" });
+        }
+
+        const student = results[0];
+        const studentData = {
+            first_name: student.first_name,
+            last_name: student.last_name,
+            student_id: student.student_id
+        };
+
+        const attendancePercentage = ((totalClasses - absenceDays) / totalClasses * 100).toFixed(1);
+
+        const attendanceDetails = {
+            absenceDays,
+            totalClasses,
+            attendancePercentage
+        };
+
+        const result = await sendAttendanceAlertEmail(parentEmail, studentData, attendanceDetails);
+
+        if (result.success) {
+            res.json({ message: "Attendance alert sent successfully!", success: true });
+        } else {
+            res.status(500).json({
+                message: "Failed to send attendance alert",
+                error: result.error,
+                success: false
+            });
+        }
+    });
+});
+
+// Resend registration email
+app.post('/resend-registration-email/:studentId', async (req, res) => {
+    const studentId = req.params.studentId;
+
+    // Get student and grade details
+    const sql = `
+        SELECT s.*, g.name as grade_name
+        FROM students s
+        JOIN grades g ON s.grade_id = g.grade_id
+        WHERE s.student_id = ?
+    `;
+
+    db.query(sql, [studentId], async (err, results) => {
+        if (err) {
+            console.error("Error fetching student:", err);
+            return res.status(500).json({ message: "Error fetching student data" });
+        }
+        if (results.length === 0) {
+            return res.status(404).json({ message: "Student not found" });
+        }
+
+        const student = results[0];
+        const emailData = {
+            email: student.email,
+            first_name: student.first_name,
+            last_name: student.last_name,
+            student_id: student.student_id,
+            password: student.password,
+            grade_name: student.grade_name
+        };
+
+        const result = await sendStudentRegistrationEmail(emailData);
+
+        if (result.success) {
+            res.json({ message: "Registration email resent successfully!", success: true });
+        } else {
+            res.status(500).json({
+                message: "Failed to resend registration email",
+                error: result.error,
+                success: false
+            });
+        }
+    });
+});
 
 // --- Start Server ---
 const PORT = process.env.PORT || 8081;

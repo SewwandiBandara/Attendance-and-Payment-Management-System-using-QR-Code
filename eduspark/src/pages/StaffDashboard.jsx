@@ -5,6 +5,7 @@ import { RiMoneyDollarCircleLine } from "react-icons/ri";
 import { IoLogOutOutline } from "react-icons/io5";
 import { useNavigate } from 'react-router-dom';
 import {QRCodeCanvas} from 'qrcode.react';
+import QrScanner from 'qr-scanner'; // Import QR Scanner library
 import { registerStudent,getNextStudentIdForGrade} from '../services/api';
 import {getStudentById ,getStudentQRImage, uploadStudentQRImage} from '../services/api';
 import {getGrades, getSubjects, getCourses} from '../services/api';
@@ -787,21 +788,27 @@ const ViewAttendance = () => {
     );
   };
 
-  const startScanner = () => {
+  const startScanner = async () => {
     setShowScanner(true);
     setScannedStudent(null);
-    
-    if (videoRef.current && !qrScannerRef.current) {
-      qrScannerRef.current = new QrScanner(
-        videoRef.current,
-        result => handleScan(result),
-        {
-          preferredCamera: 'environment',
-          highlightScanRegion: true,
-          highlightCodeOutline: true,
-        }
-      );
-      qrScannerRef.current.start();
+
+    try {
+      if (videoRef.current && !qrScannerRef.current) {
+        qrScannerRef.current = new QrScanner(
+          videoRef.current,
+          result => handleScan(result),
+          {
+            preferredCamera: 'environment',
+            highlightScanRegion: true,
+            highlightCodeOutline: true,
+          }
+        );
+        await qrScannerRef.current.start();
+      }
+    } catch (error) {
+      console.error('Error starting QR scanner:', error);
+      alert('Failed to start camera. Please ensure camera permissions are granted and try again.');
+      setShowScanner(false);
     }
   };
 
@@ -1147,22 +1154,28 @@ const PaymentManagement = () => {
     );
   };
 
-  const startScanner = () => {
+  const startScanner = async () => {
     setShowScanner(true);
     setScannedStudent(null);
     setInvoiceData(null);
-    
-    if (videoRef.current && !qrScannerRef.current) {
-      qrScannerRef.current = new QrScanner(
-        videoRef.current,
-        result => handleScan(result),
-        {
-          preferredCamera: 'environment',
-          highlightScanRegion: true,
-          highlightCodeOutline: true,
-        }
-      );
-      qrScannerRef.current.start();
+
+    try {
+      if (videoRef.current && !qrScannerRef.current) {
+        qrScannerRef.current = new QrScanner(
+          videoRef.current,
+          result => handleScan(result),
+          {
+            preferredCamera: 'environment',
+            highlightScanRegion: true,
+            highlightCodeOutline: true,
+          }
+        );
+        await qrScannerRef.current.start();
+      }
+    } catch (error) {
+      console.error('Error starting QR scanner:', error);
+      alert('Failed to start camera. Please ensure camera permissions are granted and try again.');
+      setShowScanner(false);
     }
   };
 
